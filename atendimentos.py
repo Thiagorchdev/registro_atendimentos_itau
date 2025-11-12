@@ -7,35 +7,28 @@ from google.oauth2.service_account import Credentials
 # ======== CONFIGURAÇÃO ========
 SENHA_GERENCIAL = "itau2025"
 
-# ======== CONEXÃO COM GOOGLE SHEETS ========
-def conectar_planilha():
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    cliente = gspread.authorize(creds)
-    sheet_id = st.secrets["sheets"]["sheet_id"]
-    planilha = cliente.open_by_key(sheet_id).sheet1
-    return planilha
+# Autenticação com Google Sheets
+scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+credentials = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], scopes=scopes
+)
+gc = gspread.authorize(credentials)
+SHEET_ID = st.secrets["sheet_id"]
+worksheet = gc.open_by_key(SHEET_ID).sheet1
 
 
+# ======== FUNÇÕES ========
 def carregar_base():
-    planilha = conectar_planilha()
-    dados = planilha.get_all_records()
-    df = pd.DataFrame(dados)
-
-    if df.empty:
-        st.warning("A planilha está vazia!")
+    data = worksheet.get_all_records()
+    df = pd.DataFrame(data)
     return df
 
 
 def salvar_base(df):
-    planilha = conectar_planilha()
-    planilha.clear()  # limpa antes de atualizar
-    planilha.update([df.columns.values.tolist()] + df.values.tolist())
+    worksheet.clear()
+    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
 
 
-# ======== FUNÇÕES ========
 def registrar_atendimento(matricula):
     df = carregar_base()
 
@@ -49,7 +42,7 @@ def registrar_atendimento(matricula):
     divisao = df.at[idx, "DIVISÃO"]
     atendimento_existente = df.at[idx, "ATENDIMENTO"]
 
-    if not pd.isna(atendimento_existente):
+    if atendimento_existente:
         st.info(f"ℹ️ {nome} ({setor}/{divisao}) já foi atendido em **{atendimento_existente}**.")
         return
 
@@ -197,7 +190,12 @@ st.markdown('<p class="subtitle">Digite sua matrícula para registrar seu atendi
 st.markdown('<div class="input-section">', unsafe_allow_html=True)
 st.markdown('<p class="input-label">Número da Matrícula</p>', unsafe_allow_html=True)
 
-matricula_input = st.text_input("", key="matricula", placeholder="Digite aqui", label_visibility="collapsed")
+matricula_input = st.text_input(
+    "",
+    key="matricula",
+    placeholder="Digite aqui",
+    label_visibility="collapsed"
+)
 
 if st.button("Registrar Atendimento"):
     if matricula_input.strip():
@@ -211,7 +209,6 @@ if st.button("Registrar Atendimento"):
                 idx = df.index[df["MATRICULA"] == matricula][0]
                 nome = df.at[idx, "NOME"]
 
-                # Guarda dados temporariamente no estado
                 st.session_state["matricula_confirmar"] = matricula
                 st.session_state["nome_confirmar"] = nome
         except ValueError:
@@ -229,26 +226,38 @@ if "matricula_confirmar" in st.session_state:
         <div class="modal-content">
             <h2>👤 {nome}</h2>
             <p style='font-size:22px;'>Deseja confirmar presença?</p>
+            <div style='display:flex; justify-content:center; gap:30px; margin-top:30px;'>
+                <form action="?confirmar=true" method="get">
+                    <button type="submit" 
+                        style="font-size:20px; padding:12px 30px; background:#0072ff; color:white; border:none; border-radius:10px; cursor:pointer;">
+                        ✅ Confirmar
+                    </button>
+                </form>
+                <form action="?cancelar=true" method="get">
+                    <button type="submit" 
+                        style="font-size:20px; padding:12px 30px; background:#ccc; color:#002b5c; border:none; border-radius:10px; cursor:pointer;">
+                        ❌ Cancelar
+                    </button>
+                </form>
+            </div>
         </div>
     </div>
     """
     st.markdown(modal_html, unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
-    confirmar = col1.button("✅ Confirmar", key="confirmar_popup")
-    cancelar = col2.button("❌ Cancelar", key="cancelar_popup")
-
-    if confirmar:
+    query_params = st.experimental_get_query_params()
+    if "confirmar" in query_params:
         registrar_atendimento(matricula)
         st.session_state["matricula"] = ""
-        del st.session_state["matricula_confirmar"]
-        del st.session_state["nome_confirmar"]
+        st.session_state.pop("matricula_confirmar", None)
+        st.session_state.pop("nome_confirmar", None)
+        st.experimental_set_query_params()
         st.experimental_rerun()
-
-    if cancelar:
+    elif "cancelar" in query_params:
         st.session_state["matricula"] = ""
-        del st.session_state["matricula_confirmar"]
-        del st.session_state["nome_confirmar"]
+        st.session_state.pop("matricula_confirmar", None)
+        st.session_state.pop("nome_confirmar", None)
+        st.experimental_set_query_params()
         st.experimental_rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
