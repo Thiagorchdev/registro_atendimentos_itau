@@ -1,24 +1,41 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import os
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ======== CONFIGURAÇÃO ========
-ARQUIVO_BASE = "BASEITAUBANCO.xlsx"
 SENHA_GERENCIAL = "itau2025"
 
-# ======== FUNÇÕES ========
+# ======== CONEXÃO COM GOOGLE SHEETS ========
+def conectar_planilha():
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    cliente = gspread.authorize(creds)
+    sheet_id = st.secrets["sheets"]["sheet_id"]
+    planilha = cliente.open_by_key(sheet_id).sheet1
+    return planilha
+
+
 def carregar_base():
-    if not os.path.exists(ARQUIVO_BASE):
-        st.error(f"Arquivo {ARQUIVO_BASE} não encontrado.")
-        st.stop()
-    return pd.read_excel(ARQUIVO_BASE)
+    planilha = conectar_planilha()
+    dados = planilha.get_all_records()
+    df = pd.DataFrame(dados)
+
+    if df.empty:
+        st.warning("A planilha está vazia!")
+    return df
 
 
 def salvar_base(df):
-    df.to_excel(ARQUIVO_BASE, index=False)
+    planilha = conectar_planilha()
+    planilha.clear()  # limpa antes de atualizar
+    planilha.update([df.columns.values.tolist()] + df.values.tolist())
 
 
+# ======== FUNÇÕES ========
 def registrar_atendimento(matricula):
     df = carregar_base()
 
@@ -180,12 +197,7 @@ st.markdown('<p class="subtitle">Digite sua matrícula para registrar seu atendi
 st.markdown('<div class="input-section">', unsafe_allow_html=True)
 st.markdown('<p class="input-label">Número da Matrícula</p>', unsafe_allow_html=True)
 
-matricula_input = st.text_input(
-    "",
-    key="matricula",
-    placeholder="Digite aqui",
-    label_visibility="collapsed"
-)
+matricula_input = st.text_input("", key="matricula", placeholder="Digite aqui", label_visibility="collapsed")
 
 if st.button("Registrar Atendimento"):
     if matricula_input.strip():
